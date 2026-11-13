@@ -198,7 +198,10 @@ not read-only, `destructiveHint` and `openWorldHint` are true.
 
 `solidcraft-cli` is on `PATH` after every package install: the Windows installer adds its folder, the deb, rpm and FreeBSD packages install it in `/usr/bin`, the Homebrew cask links it, the AppImage writes a small `solidcraft-cli` launcher into `~/.local/bin` on its first run, and the macOS app links it into `/opt/homebrew/bin` or `/usr/local/bin` when it starts (Help > Install solidcraft-cli command does it with an administrator prompt when those are not writable). Two packages keep it out of `PATH` by design: Snap exposes it as `solidcraft.cli`, and Flatpak runs it as `flatpak run --command=solidcraft-cli io.tangencylabs.solidcraft`; use those as the client's `command` (with `mcp` as the arguments).
 
-The quickest way: **Help > Connect AI assistants…** in the app, or
+The quickest way: the **AI button** on the application bar (next to Save, Undo and Redo), or
+**Help > Connect AI assistants…** in the app. Both open the same window, which lists the assistants
+it found, connects them with one button, and shows the exact file and entry to add the server by hand
+for every client it supports:
 
 ```sh
 solidcraft-cli mcp setup            # every client found on this computer

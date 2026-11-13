@@ -21,6 +21,10 @@ use solidcraft_engine::licences::{LICENSE_APACHE, LICENSE_MIT, NOTICE, THIRD_PAR
 pub struct HelpState {
     pub menu: bool,
     pub about: bool,
+    /// The Connect AI assistants window is open. It is opened from the application bar's AI button,
+    /// which changes nothing until its Connect button is pressed, and from the Help menu, which
+    /// connects at once.
+    pub connect_open: bool,
     /// The result of Connect AI assistants, one line per client, while its window is open.
     pub connect: Option<Vec<String>>,
     /// The GPU the window renders with (set by the host).
@@ -68,7 +72,10 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
             app.keymap.read_only = true;
         }
         "crashes" => crate::crash_ui::open(app),
-        "connect" => app.help.connect = Some(connect_assistants()),
+        "connect" => {
+            app.help.connect_open = true;
+            app.help.connect = Some(connect_assistants());
+        }
         "install_cli" => {
             let (msg, error) = crate::cli_link::install_from_menu();
             app.set_status(msg, error);
@@ -83,15 +90,22 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
     }
 }
 
+/// The `solidcraft-cli` to put in an entry: the one beside this program, without the `\\?\` prefix
+/// `canonicalize` adds on Windows.
+#[cfg(not(target_arch = "wasm32"))]
+fn cli_path() -> Option<String> {
+    let cli = crate::agent_chat::find_cli()?;
+    Some(solidcraft_engine::agent_setup::plain_path(&cli.canonicalize().unwrap_or(cli)))
+}
+
 /// Add SolidCraft's MCP server to the AI assistants installed here (`solidcraft-cli mcp setup`),
 /// with the `solidcraft-cli` beside this program. One line per client.
 #[cfg(not(target_arch = "wasm32"))]
 fn connect_assistants() -> Vec<String> {
     use solidcraft_engine::agent_setup as setup;
-    let Some(cli) = crate::agent_chat::find_cli() else {
+    let Some(cli) = cli_path() else {
         return vec!["solidcraft-cli was not found next to SolidCraft; run `solidcraft-cli mcp setup` from a terminal.".into()];
     };
-    let cli = cli.canonicalize().unwrap_or(cli).to_string_lossy().trim_start_matches(r"\\?\").to_owned();
     match setup::setup(&[], &setup::Env::from_process(), &cli) {
         Ok((lines, _)) => lines,
         Err(e) => vec![e],
@@ -103,27 +117,89 @@ fn connect_assistants() -> Vec<String> {
     vec!["Connecting AI assistants needs the desktop app.".into()]
 }
 
-/// The Connect AI assistants result window.
+/// How to add the server by hand, for every assistant SolidCraft knows (OpenCode, Claude Desktop,
+/// Claude Code, Codex, Cursor and the rest): its configuration file and the entry to paste.
+#[cfg(not(target_arch = "wasm32"))]
+fn connect_instructions() -> Vec<solidcraft_engine::agent_setup::Instructions> {
+    use solidcraft_engine::agent_setup as setup;
+    let Some(cli) = cli_path() else { return Vec::new() };
+    setup::instructions(&setup::Env::from_process(), &cli)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn connect_instructions() -> Vec<solidcraft_engine::agent_setup::Instructions> {
+    Vec::new()
+}
+
+/// The Connect AI assistants window: which assistants are installed, the button that connects them,
+/// and the exact file and entry for each one, so an assistant SolidCraft did not find can be
+/// connected by hand.
 fn connect(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(lines) = app.help.connect.clone() else {
+    if !app.help.connect_open {
         return;
-    };
+    }
+    let rows = connect_instructions();
+    let results = app.help.connect.clone();
+    let (mut run, mut copy_all, mut copy) = (false, false, None::<String>);
     let (closed, action) =
-        ui_kit::Window::new(egui::Id::unique("sc_connect_assistants"), "help", solidcraft_ui_text::tr_label("Connect AI assistants"))
-            .cards(2.0)
+        ui_kit::Window::new(egui::Id::unique("sc_connect_assistants"), "agent_link", solidcraft_ui_text::tr_label("help.connect_title"))
+            .cards(3.0)
             .actions("", "Close", None)
             .show(ctx, true, |ui| {
-                ui_kit::text(
-                    ui,
-                    solidcraft_ui_text::tr_label(
-                        "Restart each assistant to load the SolidCraft server. Each file was backed up as .bak before it changed.",
-                    ),
-                    ui_kit::Text::Note("connect_note"),
-                );
-                ui_kit::text(ui, &lines.join("\n"), ui_kit::Text::Report("connect", false));
+                ui_kit::text(ui, solidcraft_ui_text::tr_label("connect.intro"), ui_kit::Text::Note("connect_intro"));
+                let buttons = ui.horizontal(|ui| {
+                    let run_button = ui_kit::button(ui, solidcraft_ui_text::tr_label("connect.run"), ui_kit::Button::Primary);
+                    crate::scenario::publish_target("connect:run", run_button.rect);
+                    let all = ui_kit::button(ui, solidcraft_ui_text::tr_label("connect.copy_all"), ui_kit::Button::Small);
+                    crate::scenario::publish_target("connect:copy_all", all.rect);
+                    (run_button.clicked(), all.clicked())
+                });
+                let (connect_clicked, all_clicked) = buttons.inner;
+                run |= connect_clicked;
+                copy_all |= all_clicked;
+                if let Some(lines) = &results {
+                    ui_kit::text(ui, &lines.join("\n"), ui_kit::Text::Report("connect", false));
+                }
+                ui_kit::text(ui, solidcraft_ui_text::tr_label("connect.restart"), ui_kit::Text::Note("connect_restart"));
+                ui_kit::section_heading(ui, "connect.manual");
+                egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().control_height * 15.0).show(ui, |ui| {
+                    for row in &rows {
+                        let _ = ui_kit::section(ui, row.client, row.label, true, |ui| {
+                            ui_kit::text(ui, &row.file.display().to_string(), ui_kit::Text::MonoNote("connect_file"));
+                            if !row.found {
+                                ui_kit::text(ui, solidcraft_ui_text::tr_label("connect.not_found"), ui_kit::Text::Hint("connect_not_found"));
+                            }
+                            ui_kit::text(ui, &row.snippet, ui_kit::Text::Report("connect_snippet", false));
+                            let button = ui_kit::button(ui, solidcraft_ui_text::tr_label("connect.copy"), ui_kit::Button::Small);
+                            crate::scenario::publish_target(&format!("connect:copy:{}", row.client), button.rect);
+                            if button.clicked() {
+                                copy = Some(row.snippet.clone());
+                            }
+                        });
+                    }
+                });
             });
+    if run {
+        app.help.connect = Some(connect_assistants());
+    }
+    if let Some(text) = copy {
+        ctx.copy_text(text);
+    }
+    if copy_all {
+        let all: Vec<String> = rows.iter().map(|r| format!("{}\n{}\n{}", r.label, r.file.display(), r.snippet)).collect();
+        ctx.copy_text(all.join("\n\n"));
+    }
     if closed || action == ui_kit::Action::Cancel {
+        app.help.connect_open = false;
         app.help.connect = None;
+    }
+}
+
+/// Open the Connect AI assistants window from the application bar's AI button. Nothing is written
+/// until its Connect button is pressed.
+pub fn open_connect(app: &mut SolveApp) {
+    if available(app, "connect") {
+        app.help.connect_open = true;
     }
 }
 
@@ -146,7 +222,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                         ("messages", "Messages…", "list"),
                         ("report", "Report an Issue…", "bug_report"),
                         ("crashes", "Crash Reports…", "status_error"),
-                        ("connect", "Connect AI assistants…", "settings"),
+                        ("connect", "Connect AI assistants…", "agent_link"),
                         ("install_cli", "Install solidcraft-cli command", "settings"),
                     ]
                     .into_iter()

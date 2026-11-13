@@ -242,6 +242,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
                     action("redo", "redo", &redo_tip, shown, true),
+                    // The AI button: connects Claude, Codex, OpenCode and the other assistants
+                    // through MCP, and says exactly how to add the server by hand (Help > Connect
+                    // AI assistants does the same from the ? menu).
+                    action("connect_ai", "agent_link", solidcraft_ui_text::tr_label("ui.connect_ai"), true, false),
                 ],
                 quick,
                 help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
@@ -287,6 +291,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         "save" => save(app),
                         "undo" => FileAction::Undo.run(app),
                         "redo" => FileAction::Redo.run(app),
+                        "connect_ai" => crate::help::open_connect(app),
                         "settings" => crate::prefs::open_at(app, 0),
                         _ => {}
                     },

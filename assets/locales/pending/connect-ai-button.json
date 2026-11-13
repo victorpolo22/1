@@ -1,0 +1,22 @@
+{
+  "en": {
+    "ui.connect_ai": "Connect AI assistants…",
+    "connect.intro": "SolidCraft speaks the Model Context Protocol, so an assistant can build and change this design with the same commands the toolbar runs. Connect writes the server entry for the assistants installed here; the manual setup below is the same step by hand, for any assistant SolidCraft did not find.",
+    "connect.run": "Connect the assistants on this computer",
+    "connect.restart": "Restart an assistant to load the SolidCraft server. Each file Connect changed was backed up as .bak first.",
+    "connect.manual": "Add the server by hand",
+    "connect.copy": "Copy",
+    "connect.copy_all": "Copy all",
+    "connect.not_found": "SolidCraft did not find this assistant here; create its configuration file (and folder, if it does not exist) before pasting the entry."
+  },
+  "es": {
+    "ui.connect_ai": "Conectar asistentes de IA…",
+    "connect.intro": "SolidCraft habla el Protocolo de Contexto de Modelos (MCP), así que un asistente puede construir y cambiar este diseño con los mismos comandos que ejecuta la barra de herramientas. Conectar escribe la entrada del servidor para los asistentes instalados aquí; la configuración manual de abajo es ese mismo paso, a mano, para cualquier asistente que SolidCraft no haya encontrado.",
+    "connect.run": "Conectar los asistentes de este equipo",
+    "connect.restart": "Reinicia el asistente para que cargue el servidor de SolidCraft. Cada archivo que Conectar cambió se guardó antes como .bak.",
+    "connect.manual": "Añadir el servidor a mano",
+    "connect.copy": "Copiar",
+    "connect.copy_all": "Copiar todo",
+    "connect.not_found": "SolidCraft no encontró este asistente aquí; crea su archivo de configuración (y su carpeta, si no existe) antes de pegar la entrada."
+  }
+}

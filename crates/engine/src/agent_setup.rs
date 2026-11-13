@@ -94,6 +94,64 @@ struct Target {
 /// The names `--client` takes.
 pub const CLIENTS: &[&str] = &["opencode", "claude-desktop", "claude-code", "cursor", "codex", "gemini", "copilot", "windsurf", "zed", "vscode"];
 
+/// The client as people know it, for Help > Connect AI assistants.
+pub fn client_label(client: &str) -> &'static str {
+    match client {
+        "opencode" => "OpenCode",
+        "claude-desktop" => "Claude Desktop",
+        "claude-code" => "Claude Code",
+        "cursor" => "Cursor",
+        "codex" => "Codex",
+        "gemini" => "Gemini CLI",
+        "copilot" => "GitHub Copilot CLI",
+        "windsurf" => "Windsurf",
+        "zed" => "Zed",
+        "vscode" => "VS Code",
+        _ => "AI assistant",
+    }
+}
+
+/// How to add the server to one client by hand, for the assistants `setup` did not find.
+pub struct Instructions {
+    /// The name `--client` takes.
+    pub client: &'static str,
+    /// The client as people know it.
+    pub label: &'static str,
+    /// The configuration file it reads.
+    pub file: PathBuf,
+    /// The entry to put in that file, spelled the way the client expects it.
+    pub snippet: String,
+    /// Whether the client's configuration folder exists, which is what `setup` looks for.
+    pub found: bool,
+}
+
+/// Every client with the file it reads and the entry to put in it, so Help > Connect AI assistants
+/// can give exact instructions, including for the assistants `setup` found nothing for.
+pub fn instructions(env: &Env, exe: &str) -> Vec<Instructions> {
+    let found: Vec<&'static str> = detect(env, None).iter().map(|t| t.client).collect();
+    detect_any(env, None, false)
+        .into_iter()
+        .map(|t| Instructions {
+            client: t.client,
+            label: client_label(t.client),
+            found: found.contains(&t.client),
+            snippet: snippet(t.shape, exe, &["mcp"]),
+            file: t.file,
+        })
+        .collect()
+}
+
+/// The entry a client needs, as text to paste into its file.
+fn snippet(shape: Shape, exe: &str, args: &[&str]) -> String {
+    if shape == Shape::Codex {
+        let list = args.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>().join(", ");
+        return format!("[mcp_servers.solidcraft]\ncommand = {exe:?}\nargs = [{list}]");
+    }
+    let mut list = serde_json::Map::new();
+    list.insert(shape.list_key().to_owned(), json!({ "solidcraft": shape.entry(exe, args) }));
+    serde_json::to_string_pretty(&Value::Object(list)).unwrap_or_default()
+}
+
 /// The server entries to write: `solidcraft`, and `solidcraft-live` with `--live`.
 fn servers(live: bool) -> Vec<(&'static str, Vec<&'static str>)> {
     let mut v = vec![("solidcraft", vec!["mcp"])];
@@ -163,13 +221,19 @@ fn vscode_dir(env: &Env) -> Option<PathBuf> {
 
 /// The clients found on this machine: those whose configuration folder exists.
 fn detect(env: &Env, only: Option<&str>) -> Vec<Target> {
+    detect_any(env, only, true)
+}
+
+/// The clients `only` names, whether or not their configuration folder exists: the ones
+/// [`instructions`] describe.
+fn detect_any(env: &Env, only: Option<&str>, existing_only: bool) -> Vec<Target> {
     let want = |c: &str| only.is_none_or(|o| o == c);
     let mut v = Vec::new();
-    fn add(v: &mut Vec<Target>, client: &'static str, dir: Option<PathBuf>, file: &str, shape: Shape) {
-        if let Some(dir) = dir.filter(|d| d.is_dir()) {
+    let add = |v: &mut Vec<Target>, client: &'static str, dir: Option<PathBuf>, file: &str, shape: Shape| {
+        if let Some(dir) = dir.filter(|d| !existing_only || d.is_dir()) {
             v.push(Target { client, file: dir.join(file), shape });
         }
-    }
+    };
     if want("opencode") {
         let dir = env.config_home().map(|c| c.join("opencode"));
         // opencode.jsonc is read too (comments allowed); keep to the one the user has.
@@ -187,7 +251,7 @@ fn detect(env: &Env, only: Option<&str>) -> Vec<Target> {
     }
     if want("claude-code")
         && let Some(h) = &env.home
-        && (h.join(".claude.json").is_file() || h.join(".claude").is_dir())
+        && (!existing_only || h.join(".claude.json").is_file() || h.join(".claude").is_dir())
     {
         v.push(Target { client: "claude-code", file: h.join(".claude.json"), shape: Shape::ClaudeCode });
     }
@@ -958,6 +1022,39 @@ mod tests {
         // Turning it off takes the entries out again.
         assert_eq!(quiet(&env, EXE, true).removed, ["cursor", "gemini"]);
         assert!(!std::fs::read_to_string(h.join(".cursor/mcp.json")).unwrap().contains("solidcraft"));
+        let _ = std::fs::remove_dir_all(&h);
+    }
+
+    /// Help > Connect AI assistants gives every client its file and the entry to paste, whether or
+    /// not setup found it (an empty home finds none).
+    #[test]
+    fn instructions_name_the_file_and_the_entry_for_a_client_setup_skips() {
+        let h = std::env::temp_dir().join(format!("solidcraft-instr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&h);
+        let env = Env {
+            home: Some(h.clone()),
+            appdata: Some(h.join("AppData/Roaming")),
+            local_appdata: Some(h.join("AppData/Local")),
+            xdg_config: Some(h.join("xdg")),
+            codex_home: None,
+        };
+        let rows = instructions(&env, EXE);
+        let row = |client: &str| rows.iter().find(|r| r.client == client).unwrap_or_else(|| panic!("{client} has no instructions"));
+        // Nothing is installed here, so nothing is "found", and the instructions still exist.
+        assert!(rows.iter().all(|r| !r.found));
+        let opencode = row("opencode");
+        assert_eq!(opencode.label, "OpenCode");
+        assert!(opencode.file.ends_with("opencode.json"), "{}", opencode.file.display());
+        let open: Value = serde_json::from_str(&opencode.snippet).unwrap();
+        assert_eq!(open["mcp"]["solidcraft"]["command"], json!([EXE, "mcp"]));
+        assert_eq!(open["mcp"]["solidcraft"]["type"], json!("local"));
+        // Codex reads TOML, not JSON.
+        let codex = row("codex");
+        assert!(codex.snippet.contains("[mcp_servers.solidcraft]") && codex.snippet.contains(EXE), "{}", codex.snippet);
+        // Each client's own list key, so the paste lands where the client looks.
+        assert!(row("cursor").snippet.contains("mcpServers"));
+        assert!(row("zed").snippet.contains("context_servers"));
+        assert!(row("vscode").snippet.contains("servers"));
         let _ = std::fs::remove_dir_all(&h);
     }
 }
