@@ -1,0 +1,76 @@
+# Build of this fork on a GitHub-hosted Windows runner: the machine where the change was
+# written runs Windows Smart App Control, which refuses to execute any unsigned binary it has no
+# reputation for (so no local build is possible there).
+#
+# Runs on demand (Actions > Build (local fork) > Run workflow) and on changes to this file.
+# It compiles the app and the CLI with the repository's pinned toolchain, runs the
+# agent_setup tests, packs a portable zip and publishes it as the `local-build` release, so the
+# artifact can be downloaded without a token.
+name: Build (local fork)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-local.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: local-build
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Tests of the new instructions code
+        run: cargo test --locked -p solidcraft-engine agent_setup -- --nocapture
+
+      - name: Build the app and the CLI
+        run: cargo build --locked -p solidcraft -p solidcraft-cli --profile ci
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $stage = 'dist/solidcraft-local'
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item 'target/ci/solidcraft.exe', 'target/ci/solidcraft-cli.exe' $stage
+          if (Test-Path 'target/ci/solvecraft-cli.exe') { Copy-Item 'target/ci/solvecraft-cli.exe' $stage }
+          foreach ($f in 'README.local.md', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') {
+            if (Test-Path $f) { Copy-Item $f $stage }
+          }
+          Compress-Archive -Path $stage -DestinationPath 'dist/solidcraft-local-windows-x64.zip'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: solidcraft-local-windows-x64
+          path: dist/solidcraft-local-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Publish the zip as a release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: local-build
+          name: Build local de main
+          body: |
+            Compilación automática de `main` en un runner Windows (MSVC) con el botón **IA** y la
+            ventana de conexión de asistentes.
+
+            Perfil `ci` (opt-level 1): sirve para probar la función; para uso diario compílalo en
+            tu equipo con `cargo build --release -p solidcraft`.
+          files: dist/solidcraft-local-windows-x64.zip
